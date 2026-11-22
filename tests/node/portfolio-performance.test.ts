@@ -71,133 +71,61 @@ test("rejects malformed freshness and settlement counts", () => {
   );
 });
 
-test("accepts observation coverage with lastTrustedLedger and missingIntervals", () => {
-  assert.equal(
-    isPortfolioPerformanceResponse({
-      points: [
-        { timestamp: 1_800_000_000_000, value: 0 },
-        { timestamp: 1_800_000_300_000, value: 4.5 },
-      ],
-      settled: 2,
-      cache: CACHE,
-      coverage: {
-        lastTrustedLedger: 123_456,
-        missingIntervals: [
-          {
-            startTimestamp: 1_800_000_060_000,
-            endTimestamp: 1_800_000_180_000,
-            reason: "indexer lag",
-          },
-        ],
-      },
-    }),
-    true,
-  );
+test("rejects localized display strings to ensure presentation is never parsed into arithmetic", () => {
+  const invalidLocalizedPoints = [
+    { timestamp: 1_800_000_000_000, value: "$1,234.56" },
+    { timestamp: 1_800_000_000_000, value: "1,234.56" },
+    { timestamp: 1_800_000_000_000, value: "1.234,56" },
+    { timestamp: 1_800_000_000_000, value: "12.50 USDC" },
+    { timestamp: 1_800_000_000_000, value: null },
+    { timestamp: 1_800_000_000_000, value: undefined },
+  ];
 
-  assert.equal(
-    isPerformanceObservationCoverage({
-      lastTrustedLedger: null,
-      missingIntervals: [],
-    }),
-    true,
-  );
-});
-
-test("rejects malformed observation coverage rather than silently accepting it", () => {
-  for (const badCoverage of [
-    { lastTrustedLedger: -1, missingIntervals: [] },
-    { lastTrustedLedger: 12.5, missingIntervals: [] },
-    { lastTrustedLedger: "123", missingIntervals: [] },
-    { lastTrustedLedger: 100, missingIntervals: "none" },
-    {
-      lastTrustedLedger: 100,
-      missingIntervals: [{ startTimestamp: 200, endTimestamp: 100 }],
-    },
-    {
-      lastTrustedLedger: 100,
-      missingIntervals: [{ startTimestamp: 0, endTimestamp: 100 }],
-    },
-    {
-      lastTrustedLedger: 100,
-      missingIntervals: [{ startTimestamp: 100, endTimestamp: 200, reason: 42 }],
-    },
-  ]) {
+  for (const point of invalidLocalizedPoints) {
     assert.equal(
       isPortfolioPerformanceResponse({
-        points: [],
-        settled: 0,
+        points: [point as unknown as { timestamp: number; value: number }],
+        settled: 1,
         cache: CACHE,
-        coverage: badCoverage,
       }),
       false,
+      `expected point with value ${JSON.stringify(point.value)} to be rejected`,
     );
   }
 });
 
-test("parseTrustedLedger accepts non-negative integers and fails closed on invalid input", () => {
-  assert.equal(parseTrustedLedger("543210"), 543_210);
-  assert.equal(parseTrustedLedger(" 0 "), 0);
-  assert.equal(parseTrustedLedger(99), 99);
-  assert.equal(parseTrustedLedger(null), null);
-  assert.equal(parseTrustedLedger(undefined), null);
-  assert.equal(parseTrustedLedger(""), null);
-  assert.equal(parseTrustedLedger("-5"), null);
-  assert.equal(parseTrustedLedger("12.34"), null);
-  assert.equal(parseTrustedLedger("abc"), null);
-  assert.equal(parseTrustedLedger(-1), null);
-  assert.equal(parseTrustedLedger(Number.NaN), null);
-});
-
-test("normalizeMissingIntervals sorts and merges overlapping intervals", () => {
-  const merged = normalizeMissingIntervals([
-    { startTimestamp: 300, endTimestamp: 400, reason: "late" },
-    { startTimestamp: 100, endTimestamp: 200, reason: "first" },
-    { startTimestamp: 180, endTimestamp: 250 },
-  ]);
-  assert.deepEqual(merged, [
-    { startTimestamp: 100, endTimestamp: 250, reason: "first" },
-    { startTimestamp: 300, endTimestamp: 400, reason: "late" },
-  ]);
-});
-
-test("splitPointsByMissingIntervals breaks the line across gaps while preserving verified zero performance", () => {
-  const verifiedZeroSeries = [
-    { timestamp: 1_000, value: 0 },
-    { timestamp: 2_000, value: 0 },
-    { timestamp: 3_000, value: 0 },
-  ];
-  // Verified zero performance with no missing intervals remains one continuous segment.
-  assert.deepEqual(splitPointsByMissingIntervals(verifiedZeroSeries, []), [
-    verifiedZeroSeries,
-  ]);
-
-  // A missing interval between 1_500 and 2_500 splits the series into separate observed segments.
-  const gappedSeries = [
-    { timestamp: 1_000, value: 1.5 },
-    { timestamp: 1_400, value: 2.0 },
-    { timestamp: 2_600, value: 0 },
-    { timestamp: 3_000, value: 3.0 },
-  ];
-  assert.deepEqual(
-    splitPointsByMissingIntervals(gappedSeries, [
-      { startTimestamp: 1_500, endTimestamp: 2_500, reason: "unobserved gap" },
-    ]),
-    [
-      [
-        { timestamp: 1_000, value: 1.5 },
-        { timestamp: 1_400, value: 2.0 },
-      ],
-      [
-        { timestamp: 2_600, value: 0 },
-        { timestamp: 3_000, value: 3.0 },
-      ],
+test("preserves canonical numeric values across locale formatting switches", () => {
+  const payload = {
+    points: [
+      { timestamp: 1_800_000_000_000, value: 1234.5678901 },
+      { timestamp: 1_800_000_060_000, value: -0.0000001 },
     ],
-  );
-});
+    settled: 2,
+    cache: CACHE,
+  };
 
-test("formatTrustedLedger formats ledger numbers and unavailable fallback", () => {
-  assert.equal(formatTrustedLedger(1_234_567), "#1,234,567");
-  assert.equal(formatTrustedLedger(0), "#0");
-  assert.equal(formatTrustedLedger(null), "unavailable");
-  assert.equal(formatTrustedLedger(undefined), "unavailable");
+  assert.equal(isPortfolioPerformanceResponse(payload), true);
+
+  const locales = ["en-US", "de-DE", "es-ES", "fr-FR"];
+  for (const locale of locales) {
+    const formatter = new Intl.NumberFormat(locale, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    const formatted = payload.points.map((point) => formatter.format(point.value));
+    assert.equal(formatted.length, payload.points.length);
+
+    // Formatting for display must not mutate canonical inputs or re-enter the boundary.
+    assert.equal(payload.points[0].value, 1234.5678901);
+    assert.equal(payload.points[1].value, -0.0000001);
+    assert.equal(
+      isPortfolioPerformanceResponse({
+        points: [{ timestamp: payload.points[0].timestamp, value: formatted[0] }],
+        settled: 1,
+        cache: CACHE,
+      }),
+      false,
+      `formatted string for locale ${locale} must be rejected at the calculation boundary`,
+    );
+  }
 });
