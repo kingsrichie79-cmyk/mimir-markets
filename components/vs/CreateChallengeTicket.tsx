@@ -1,6 +1,7 @@
 "use client";
 
 import { Activity } from "lucide-react";
+import { createHash } from "crypto";
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -54,6 +55,10 @@ export type CreateChallengeTicketProps = {
   maxAmount?: number;
   /** Query string de la URL actual (p. ej. `window.location.search`). */
   searchParams?: string;
+  /** True when the connected account has changed since the last signed intent.
+   *  The ticket shows a review banner and hides the SIGNED watermark; the
+   *  parent is responsible for gating submission until re-authorization. */
+  accountChanged?: boolean;
 };
 
 /**
@@ -70,6 +75,7 @@ export default function CreateChallengeTicket({
   walletAddress,
   maxAmount,
   searchParams,
+  accountChanged = false,
 }: CreateChallengeTicketProps) {
   const t = useTranslations("create");
 
@@ -105,16 +111,38 @@ export default function CreateChallengeTicket({
   const stakeStr = Number.isFinite(effectiveStake)
     ? effectiveStake.toFixed(2)
     : "—";
+  const stakeKey = Number.isFinite(effectiveStake)
+    ? effectiveStake.toFixed(2)
+    : "invalid";
+  const reviewRevision = useMemo(() => {
+    const payload = JSON.stringify({
+      account: walletAddress ?? null,
+      amount: stakeKey,
+      claim: settlementPreview.trim(),
+    });
+    return createHash("sha256").update(payload).digest("hex").slice(0, 16);
+  }, [walletAddress, stakeKey, settlementPreview]);
+  const [reviewedRevision, setReviewedRevision] = useState<string | null>(null);
+  const reviewValid = reviewedRevision === reviewRevision;
   const body = truncate(settlementPreview.trim(), 240);
   const authDisplay = formatWalletForTicket(walletAddress);
   const showQuoted = body.length > 0;
 
   return (
     <div className={CREATE_TICKET_SHELL_CLASS}>
+      {accountChanged ? (
+        <div
+          role="status"
+          aria-live="polite"
+          className="border-b border-pv-amber/40 bg-pv-amber/10 px-4 py-2 text-xs text-pv-text"
+        >
+          Account changed — review and re-authorize before submitting.
+        </div>
+      ) : null}
       {/* Watermark — transitions from UNSIGNED to SIGNED based on wallet */}
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none select-none overflow-hidden">
         <span className={CREATE_TICKET_WATERMARK_CLASS}>
-          {walletAddress ? "SIGNED" : "UNSIGNED"}
+          {accountChanged ? "UNSIGNED" : walletAddress ? "SIGNED" : "UNSIGNED"}
         </span>
       </div>
       <div
@@ -215,6 +243,33 @@ export default function CreateChallengeTicket({
             <span className="font-display text-2xl font-bold tabular-nums text-pv-emerald">
               {stakeStr} USDC
             </span>
+          </div>
+          <div className="space-y-2 rounded-md border border-pv-ink/[0.08] p-3">
+            <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-pv-muted">
+              Review
+            </div>
+            <p className="font-mono text-xs text-pv-text">
+              Stake: {stakeStr} USDC
+            </p>
+            <p className="font-mono text-xs text-pv-text break-words">
+              Claim: {body || "—"}
+            </p>
+            <p className="font-mono text-xs text-pv-text">Network: Stellar</p>
+            <button
+              type="button"
+              onClick={() => setReviewedRevision(reviewRevision)}
+              className="font-mono text-[10px] uppercase tracking-[0.12em] text-pv-emerald"
+            >
+              Confirm review
+            </button>
+            {reviewedRevision !== null && !reviewValid ? (
+              <p className="text-[10px] text-pv-muted">
+                Review invalidated: account, amount or claim changed.
+              </p>
+            ) : null}
+            {reviewValid ? (
+              <p className="text-[10px] text-pv-emerald">Review confirmed.</p>
+            ) : null}
           </div>
         </div>
       </div>
