@@ -65,14 +65,21 @@ export const readIndexPerformance: PerformanceCalculator = async (address) => {
   const updatedAtMs = Number(lastSettlementSync ?? "0");
   const lastTrustedLedger = parseTrustedLedger(rawTrustedLedger);
 
+  const cache = buildVSCacheFreshness({
+    updatedAtMs:
+      Number.isFinite(updatedAtMs) && updatedAtMs > 0 ? updatedAtMs : null,
+    freshnessWindowMs: performanceFreshnessWindowMs(),
+    source: "index",
+  });
+
   return {
-    points: cumulativePnlPoints(results),
+    points,
     settled: performance.settled,
-    cache: buildVSCacheFreshness({
-      updatedAtMs:
-        Number.isFinite(updatedAtMs) && updatedAtMs > 0 ? updatedAtMs : null,
-      freshnessWindowMs: performanceFreshnessWindowMs(),
-      source: "index",
+    cache,
+    manifest: buildPortfolioPerformanceManifest({
+      address,
+      results,
+      cache,
     }),
     coverage: {
       lastTrustedLedger,
